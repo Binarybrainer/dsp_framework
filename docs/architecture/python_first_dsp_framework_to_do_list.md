@@ -24,22 +24,22 @@ This roadmap adopts a **Python-First / Rapid Prototyping** strategy. The goal is
 - [x] **Modulation & Demodulation**
   - [x] Implement Symbol Mapper (BPSK, QPSK, M-QAM).
   - [x] Implement Symbol Demapper (Hard/Soft decision decoding).
-- [ ] **Filters & Resampling**
-  - [ ] Implement FIR and IIR filters leveraging `scipy.signal.lfilter`.
-  - [ ] Implement Root Raised Cosine (RRC) pulse shaping filter.
-  - [ ] Implement fractional resampler using SciPy interpolation.
-- [ ] **Channel Modeling**
-  - [ ] Add Additive White Gaussian Noise (AWGN) block.
-  - [ ] Add Phase Noise and Frequency Offset impairment blocks.
-  - [ ] Implement a basic Multipath Fading channel (Rayleigh/Rician).
+- [x] **Filters & Resampling**
+  - [x] Implement FIR and IIR filters leveraging `scipy.signal.lfilter`.
+  - [x] Implement Root Raised Cosine (RRC) pulse shaping filter.
+  - [x] Implement fractional resampler using SciPy interpolation.
+- [x] **Channel Modeling**
+  - [x] Add Additive White Gaussian Noise (AWGN) block.
+  - [x] Add Phase Noise and Frequency Offset impairment blocks.
+  - [x] Implement a basic Multipath Fading channel (Rayleigh/Rician).
 
 ## Phase 3: Advanced Systems (Rapid Prototyping)
 *Focus: Complex control loops and multi-antenna systems built in pure Python to verify logic.*
 
-- [ ] **Phase-Locked Loop (PLL)**
-  - [ ] Implement Phase Frequency Detector (PFD).
-  - [ ] Implement Digital Loop Filter (PI controller).
-  - [ ] Implement VCO/NCO (Numerically Controlled Oscillator).
+- [x] **Phase-Locked Loop (PLL)**
+  - [x] Implement Phase Frequency Detector (PFD).
+  - [x] Implement Digital Loop Filter (PI controller).
+  - [x] Implement VCO/NCO (Numerically Controlled Oscillator).
 - [ ] **Clock and Data Recovery (CDR)**
   - [ ] Implement Alexander (Bang-Bang) Phase Detector.
   - [ ] Implement Phase Interpolator (PI) logic.

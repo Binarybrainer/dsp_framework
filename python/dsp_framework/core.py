@@ -580,3 +580,289 @@ class FractionalResamplerBlock(DSPBlock):
             sample_rate=target_fs,
             timestamp=t_out[0] if len(t_out) > 0 else input_buf.timestamp
         )
+
+class AWGNChannel(DSPBlock):
+    """
+    Adds Additive White Gaussian Noise to a complex baseband signal.
+    """
+    def __init__(self, snr_db: float = 20.0) -> None:
+        super().__init__(snr_db=snr_db)
+        
+    def reset(self) -> None:
+        pass # AWGN is memoryless
+
+    def process(self, input_data: np.ndarray, **kwargs: Any) -> np.ndarray:
+        snr_linear = 10 ** (self._params['snr_db'] / 10.0)
+        
+        # Calculate average signal power
+        signal_power = np.mean(np.abs(input_data)**2)
+        
+        # Calculate required noise variance
+        noise_power = signal_power / snr_linear
+        
+        # Generate complex Gaussian noise
+        # Divide by 2 because power is split between I and Q components
+        noise = np.sqrt(noise_power / 2) * (
+            np.random.randn(*input_data.shape) + 1j * np.random.randn(*input_data.shape)
+        )
+        
+        return input_data + noise
+
+class FrequencyOffsetChannel(DSPBlock):
+    """
+    Applies a continuous frequency offset (phase rotation) to the signal.
+    """
+    def __init__(self, freq_offset_hz: float = 1e3, sample_rate_hz: float = 1e6) -> None:
+        super().__init__(freq_offset_hz=freq_offset_hz, sample_rate_hz=sample_rate_hz)
+        self.reset()
+        
+    def reset(self) -> None:
+        """Reset the phase accumulator for a new simulation run."""
+        self.current_phase = 0.0
+
+    def process(self, input_data: np.ndarray, **kwargs: Any) -> np.ndarray:
+        fo = self._params['freq_offset_hz']
+        fs = self._params['sample_rate_hz']
+        num_samples = len(input_data)
+        
+        # Generate time vector for the current block
+        t = np.arange(num_samples) / fs
+        
+        # Calculate instantaneous phase rotation
+        phase_rotation = 2 * np.pi * fo * t + self.current_phase
+        
+        # Update the state for the next block to ensure continuous rotation
+        self.current_phase = (self.current_phase + 2 * np.pi * fo * (num_samples / fs)) % (2 * np.pi)
+        
+        # Apply rotation
+        return input_data * np.exp(1j * phase_rotation)
+
+class StaticMultipathChannel(DSPBlock):
+    """
+    Simulates a static multipath fading channel using a tapped delay line (FIR).
+    """
+    def __init__(self, taps: np.ndarray = np.array([1.0, 0.5j, -0.2])) -> None:
+        super().__init__(taps=taps)
+        self.reset()
+        
+    def reset(self) -> None:
+        """Clear the FIR filter delay line."""
+        taps = self._params['taps']
+        # lfilter expects state array of length max(len(a), len(b)) - 1
+        # Denominator array 'a' is just [1.0] for FIR
+        self.filter_state = np.zeros(len(taps) - 1, dtype=np.complex128)
+
+    def process(self, input_data: np.ndarray, **kwargs: Any) -> np.ndarray:
+        taps = self._params['taps']
+        
+        # Apply FIR filter (convolution). 
+        # Pass the previous state in (zi) and save the new state out (zf).
+        output_data, self.filter_state = lfilter(
+            b=taps, 
+            a=[1.0], 
+            x=input_data, 
+            zi=self.filter_state
+        )
+        
+        return output_data
+
+
+class PLLBlock(DSPBlock):
+    """
+    A digital Phase-Locked Loop (PLL) for carrier tracking and phase synchronization.
+    Includes a Phase Detector, a PI Loop Filter, and an NCO.
+    """
+    def __init__(self, kp: float = 0.1, ki: float = 0.01, center_freq: float = 0.0) -> None:
+        """
+        Args:
+            kp: Proportional gain for the loop filter.
+            ki: Integral gain for the loop filter.
+            center_freq: Nominal center frequency offset.
+        """
+        super().__init__(kp=kp, ki=ki, center_freq=center_freq)
+        self.reset()
+        
+    def reset(self) -> None:
+        """Reset the PLL states for continuous streaming."""
+        self.phase_state = 0.0
+        self.integral_state = 0.0
+
+    def process(self, input_buf: SignalBuffer, **kwargs: Any) -> SignalBuffer:
+        data = input_buf.data
+        kp = self._params['kp']
+        ki = self._params['ki']
+        w0 = self._params['center_freq']
+        
+        N = len(data)
+        out_data = np.zeros_like(data, dtype=np.complex128)
+        
+        # We must process sample-by-sample due to the feedback loop
+        for i in range(N):
+            # 1. NCO Output
+            nco_out = np.exp(1j * self.phase_state)
+            
+            # 2. Phase Detector (PD)
+            # Calculate phase error using the complex conjugate product
+            # error = Im(data * conj(nco_out))
+            phase_error = np.imag(data[i] * np.conj(nco_out))
+            
+            # 3. Loop Filter (PI)
+            self.integral_state += ki * phase_error
+            control_voltage = kp * phase_error + self.integral_state
+            
+            # 4. Update NCO Phase for the next sample
+            self.phase_state += w0 + control_voltage
+            
+            # Wrap phase to stay within [-pi, pi]
+            self.phase_state = (self.phase_state + np.pi) % (2 * np.pi) - np.pi
+            
+            # Output the synchronized / de-rotated signal
+            out_data[i] = data[i] * np.conj(nco_out)
+            
+        return input_buf.clone_metadata(out_data)
+
+class BangBangCDRBlock(DSPBlock):
+    """
+    Clock and Data Recovery using an Alexander (Bang-Bang) Phase Detector 
+    and an oversampled Phase Interpolator (PI).
+    """
+    def __init__(self, sps: int, kp: float = 0.05, ki: float = 0.005) -> None:
+        """
+        sps: Samples per symbol of the incoming oversampled data.
+        kp: Proportional loop gain.
+        ki: Integral loop gain.
+        """
+        super().__init__(sps=sps, kp=kp, ki=ki)
+        self.reset()
+        
+    def reset(self) -> None:
+        # Loop Filter states
+        self.lf_integral = 0.0
+        
+        # PI State: Tracks the fractional offset in terms of sub-samples
+        # Start sampling roughly in the middle of the oversampled eye
+        self.pi_phase = self._params['sps'] / 2.0 
+        
+        # Memory of the last recovered data symbol
+        self.last_data_sample = 0.0
+
+    def process(self, input_buf: SignalBuffer, **kwargs: Any) -> SignalBuffer:
+        data = input_buf.data
+        sps = self._params['sps']
+        kp = self._params['kp']
+        ki = self._params['ki']
+        
+        # We will extract one symbol per 'sps' roughly.
+        # Pre-allocate output assuming input length / sps
+        estimated_symbols = len(data) // sps
+        recovered_data = np.zeros(estimated_symbols, dtype=np.complex128)
+        
+        # For tracking Phase Interpolator movement (useful for debugging plots)
+        pi_track = np.zeros(estimated_symbols, dtype=np.float64)
+        
+        out_idx = 0
+        read_ptr = 0.0 # Points to the start of the current UI (Unit Interval)
+        
+        while int(read_ptr + sps) < len(data) and out_idx < estimated_symbols:
+            # 1. Phase Interpolator (PI) extracts the Edge and Data samples
+            # Edge is nominally at 0 phase, Data is nominally at PI Phase (center)
+            
+            # Sub-sample indices
+            edge_idx = int(read_ptr)
+            data_idx = int(read_ptr + self.pi_phase)
+            
+            E_n = np.sign(data[edge_idx].real) # Hard slice edge
+            D_n = np.sign(data[data_idx].real) # Hard slice data
+            D_prev = self.last_data_sample
+            
+            # 2. Alexander Bang-Bang Phase Detector (BBPD)
+            pd_out = 0.0
+            if D_prev != D_n:
+                if E_n == D_prev:
+                    pd_out = 1.0  # Clock is Early
+                else:
+                    pd_out = -1.0 # Clock is Late
+                    
+            # 3. Loop Filter (PI Controller)
+            self.lf_integral += ki * pd_out
+            pi_code = kp * pd_out + self.lf_integral
+            
+            # 4. Phase Interpolator Update
+            # Adjust the phase for the NEXT symbol. 
+            # We shift the start of the next UI by the nominal sps + the PI adjustment
+            read_ptr += sps + pi_code
+            
+            # Save data
+            recovered_data[out_idx] = data[data_idx]
+            pi_track[out_idx] = pi_code
+            self.last_data_sample = D_n
+            out_idx += 1
+            
+        # Create output buffer (Note: the sample rate is now decimated by roughly 'sps')
+        out_fs = input_buf.sample_rate / sps
+        
+        # We can store the pi_track in kwargs or a custom attribute if needed for debugging
+        self.last_pi_track = pi_track[:out_idx]
+        
+        return SignalBuffer(
+            data=recovered_data[:out_idx], 
+            sample_rate=out_fs, 
+            timestamp=input_buf.timestamp
+        )
+
+import plotly.graph_objects as go
+import numpy as np
+
+class EyeDiagramPlotter:
+    
+    @staticmethod
+    def plot_eye(buffer: SignalBuffer, sps: int, num_uis: int = 2, max_traces: int = 500, title: str = "Eye Diagram") -> go.Figure:
+        """
+        Generates an interactive Eye Diagram using Plotly WebGL.
+        
+        Args:
+            buffer: The heavily oversampled SignalBuffer (BEFORE the CDR).
+            sps: Samples per symbol (Unit Interval).
+            num_uis: How many symbols wide the eye diagram should be (usually 2 or 3).
+            max_traces: Limit the number of overlaid traces to prevent browser lag.
+        """
+        data = buffer.data.real # Eye diagrams are typically plotted for I and Q separately
+        
+        # Calculate length of one trace
+        trace_length = sps * num_uis
+        
+        # Determine how many traces we can extract
+        total_possible_traces = len(data) // trace_length
+        num_traces = min(total_possible_traces, max_traces)
+        
+        # Reshape data into a 2D array: (num_traces, trace_length)
+        # This acts as our "Oscilloscope Trigger" folding
+        folded_data = np.reshape(
+            data[:num_traces * trace_length], 
+            (num_traces, trace_length)
+        )
+        
+        # X-axis represented in Unit Intervals (UI)
+        x_axis_ui = np.linspace(0, num_uis, trace_length)
+        
+        fig = go.Figure()
+        
+        # Add multiple traces to the plot using Scattergl for performance
+        for i in range(num_traces):
+            fig.add_trace(go.Scattergl(
+                x=x_axis_ui,
+                y=folded_data[i, :],
+                mode='lines',
+                line=dict(color='rgba(0, 50, 255, 0.1)', width=1), # Low opacity blue
+                showlegend=False,
+                hoverinfo='skip' # Skip hover on individual traces to save CPU
+            ))
+            
+        fig.update_layout(
+            title=title,
+            xaxis_title="Time (Unit Intervals - UI)",
+            yaxis_title="Amplitude",
+            width=800, height=500
+        )
+        
+        return fig

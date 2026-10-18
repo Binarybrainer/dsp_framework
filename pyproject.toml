@@ -19,8 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)"
 ]
-dependencies = [
-    "numpy>=1.21.0" # Required for zero-copy array operations
+dependencies = [ # Required for zero-copy array operations
+    "numpy>=1.21.0",
+    "scipy>=1.10.1",
 ]
 
 [project.optional-dependencies]

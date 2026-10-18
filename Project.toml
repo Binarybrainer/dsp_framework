@@ -1,0 +1,20 @@
+name = "DSPFramework"
+uuid = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"
+authors = ["DSP Framework Team"]
+version = "0.1.0"
+description = "High-Performance Multi-Language DSP Simulation Framework"
+
+[deps]
+CxxWrap = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
+[compat]
+julia = "1.6"
+CxxWrap = "0.14"
+Plots = "1.38"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

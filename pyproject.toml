@@ -1,0 +1,58 @@
+[build-system]
+requires = ["scikit-build-core>=0.5.0", "pybind11>=2.11.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "dsp-framework"
+version = "0.1.0"
+description = "High-Performance Multi-Language DSP Simulation Framework"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Cuong Ho", email = "hongoccuong002@gmail.com" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Telecommunications Industry",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)"
+]
+dependencies = [
+    "numpy>=1.21.0" # Required for zero-copy array operations
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov"
+]
+plot = [
+    "matplotlib",
+    "plotly"
+]
+
+[tool.scikit-build]
+# Pass these arguments directly to CMake when building the Python wheel
+cmake.args = [
+    "-DBUILD_PYTHON_BINDINGS=ON",
+    "-DBUILD_TESTS=OFF" # Skip C++ tests when just installing the Python package
+]
+cmake.build-type = "Release"
+ninja.make-fallback = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-v --cov=dsp_framework"
+testpaths = [
+    "tests/python",
+]
+
+[tool.setuptools.package-data]
+dsp_framework = ["py.typed"]
+
+[tool.uv.workspace]
+members = [
+    "my_project",
+]

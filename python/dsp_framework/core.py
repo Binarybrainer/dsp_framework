@@ -249,3 +249,129 @@ class PRBSGenerator(SignalSource):
         # Advance internal time
         self.current_time += num_samples / self._params['sample_rate_hz']
         return buf
+
+
+from scipy.signal import square
+
+class WaveformGenerator(SignalSource):
+    """
+    Generates basic continuous waveforms: Sine, Cosine, or Square.
+    """
+    def __init__(self, 
+                 sample_rate_hz: float, 
+                 frequency_hz: float = 1e3, 
+                 amplitude: float = 1.0,
+                 phase_rad: float = 0.0,
+                 wave_type: str = 'sine') -> None:
+        
+        super().__init__(
+            sample_rate_hz=sample_rate_hz,
+            frequency_hz=frequency_hz,
+            amplitude=amplitude,
+            phase_rad=phase_rad,
+            wave_type=wave_type
+        )
+
+    def generate(self, num_samples: int) -> SignalBuffer:
+        fs = self._params['sample_rate_hz']
+        f0 = self._params['frequency_hz']
+        amp = self._params['amplitude']
+        phi = self._params['phase_rad']
+        w_type = self._params['wave_type'].lower()
+
+        # Generate continuous time vector
+        dt = 1.0 / fs
+        t = self.current_time + np.arange(num_samples) * dt
+        
+        # Calculate angular phase
+        theta = 2 * np.pi * f0 * t + phi
+
+        # Generate specific waveform
+        if w_type == 'sine':
+            data = amp * np.sin(theta)
+        elif w_type == 'cosine':
+            data = amp * np.cos(theta)
+        elif w_type == 'square':
+            # scipy.signal.square takes angular phase
+            data = amp * square(theta)
+        else:
+            raise ValueError(f"Unknown wave_type: {w_type}")
+
+        # Create SignalBuffer
+        buf = SignalBuffer(
+            data=data.astype(np.complex64),
+            sample_rate=fs,
+            timestamp=self.current_time
+        )
+        
+        # Update internal state
+        self.current_time += num_samples * dt
+        
+        return buf
+
+import numpy as np
+from typing import Any
+
+class SymbolMapperBlock(DSPBlock):
+    """
+    Maps integer symbol indices (0 to M-1) to complex constellation points.
+    Supports BPSK, QPSK, and Square M-QAM (16, 64, 256...).
+    """
+    def __init__(self, modulation_type: str = 'QPSK', M: int = 4) -> None:
+        super().__init__(modulation_type=modulation_type.upper(), M=M)
+        self._generate_constellation()
+        self.reset()
+        
+    def reset(self) -> None:
+        pass # Mapping is memoryless
+
+    def _generate_constellation(self) -> None:
+        """Generates the power-normalized Gray-coded constellation lookup table."""
+        mod_type = self._params['modulation_type']
+        M = self._params['M']
+        
+        if mod_type == 'BPSK' or (mod_type == 'QAM' and M == 2):
+            self.constellation = np.array([-1.0 + 0j, 1.0 + 0j])
+            
+        elif mod_type == 'QPSK' or (mod_type == 'QAM' and M == 4):
+            # Standard Gray-coded QPSK (pi/4 offset)
+            self.constellation = np.array([
+                -1.0 - 1j, -1.0 + 1j, 1.0 - 1j, 1.0 + 1j
+            ]) / np.sqrt(2)
+            
+        elif mod_type == 'QAM' and np.sqrt(M).is_integer():
+            # Generate Square QAM
+            k = int(np.sqrt(M))
+            # Generate PAM levels: e.g., for 16-QAM, k=4, PAM = [-3, -1, 1, 3]
+            pam_levels = 2 * np.arange(k) - (k - 1)
+            
+            # Create grid
+            real_grid, imag_grid = np.meshgrid(pam_levels, pam_levels)
+            const = (real_grid + 1j * imag_grid).flatten()
+            
+            # Simple binary to Gray mapping for the lookup table index
+            # (In a production system, an exact bit-mapped Gray code dictionary is used)
+            gray_indices = self._binary_to_gray(np.arange(M))
+            self.constellation = np.zeros(M, dtype=np.complex128)
+            self.constellation[gray_indices] = const
+            
+            # Normalize to unit average power
+            avg_power = np.mean(np.abs(self.constellation)**2)
+            self.constellation /= np.sqrt(avg_power)
+        else:
+            raise ValueError(f"Unsupported modulation: {mod_type} with M={M}")
+
+    def _binary_to_gray(self, n: np.ndarray) -> np.ndarray:
+        """Helper to convert binary indices to Gray code indices."""
+        return n ^ (n >> 1)
+
+    def process(self, input_buf: SignalBuffer, **kwargs: Any) -> SignalBuffer:
+        """
+        Input: SignalBuffer of integer symbols.
+        Output: SignalBuffer of complex IQ symbols.
+        """
+        # NumPy advanced indexing acts as a blazing fast lookup table
+        mapped_symbols = self.constellation[input_buf.data.astype(int)]
+        
+        # We output a new buffer with the same time/fs metadata
+        return input_buf.clone_metadata(mapped_symbols)

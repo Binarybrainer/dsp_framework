@@ -10,20 +10,20 @@ This roadmap adopts a **Python-First / Rapid Prototyping** strategy. The goal is
   - [x] Implement a `Pipeline` or `System` class to chain multiple `DSPBlock` instances together.
 - [x] **Data Structures**
   - [x] Implement `SignalBuffer` wrapper around `numpy.ndarray` to track sampling rate, timestamp, and active data length.
-- [ ] **Signal Generators**
-  - [ ] Implement PRBS (Pseudo-Random Binary Sequence) generator.
-  - [ ] Implement basic waveforms (Sine, Cosine, Square wave generators).
-- [ ] **Visualization (Matplotlib Wrappers)**
-  - [ ] Implement Time-Domain plotting utility.
-  - [ ] Implement Frequency-Domain (FFT / PSD) plotting utility.
-  - [ ] Implement Constellation diagram scatter plot utility.
+- [x] **Signal Generators**
+  - [x] Implement PRBS (Pseudo-Random Binary Sequence) generator.
+  - [x] Implement basic waveforms (Sine, Cosine, Square wave generators).
+- [x] **Visualization (Matplotlib Wrappers)**
+  - [x] Implement Time-Domain plotting utility.
+  - [x] Implement Frequency-Domain (FFT / PSD) plotting utility.
+  - [x] Implement Constellation diagram scatter plot utility.
 
 ## Phase 2: Core DSP Blocks
 *Focus: Essential signal processing algorithms implemented via SciPy and NumPy.*
 
-- [ ] **Modulation & Demodulation**
-  - [ ] Implement Symbol Mapper (BPSK, QPSK, M-QAM).
-  - [ ] Implement Symbol Demapper (Hard/Soft decision decoding).
+- [x] **Modulation & Demodulation**
+  - [x] Implement Symbol Mapper (BPSK, QPSK, M-QAM).
+  - [x] Implement Symbol Demapper (Hard/Soft decision decoding).
 - [ ] **Filters & Resampling**
   - [ ] Implement FIR and IIR filters leveraging `scipy.signal.lfilter`.
   - [ ] Implement Root Raised Cosine (RRC) pulse shaping filter.

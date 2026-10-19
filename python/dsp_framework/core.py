@@ -202,7 +202,7 @@ class SignalSource(DSPBlock):
         pass
     def process(self):
         print('No thing process, This is source from Signal Source')
-
+        pass
     
 from scipy.signal import max_len_seq
 
@@ -965,8 +965,6 @@ class MIMOLinearEqualizer(DSPBlock):
 import numpy as np
 from typing import Any, Optional
 from scipy.signal import windows
-from dsp_framework.core.dsp_block_api import DSPBlock
-from dsp_framework.core.signal_buffer_spec import SignalBuffer
 
 class FFTBlock(DSPBlock):
     """
@@ -1033,7 +1031,6 @@ class FFTBlock(DSPBlock):
             timestamp=input_buf.timestamp
         )
 
-
 class IFFTBlock(DSPBlock):
     """
     Computes Inverse FFT to convert frequency-domain buffers back to time domain.
@@ -1059,4 +1056,104 @@ class IFFTBlock(DSPBlock):
             data=time_data,
             sample_rate=input_buf.sample_rate,
             timestamp=input_buf.timestamp
+        )
+
+class SignalBufferAdderBlock(DSPBlock):
+    """
+    Combines multiple SignalBuffers via weighted summation.
+    Handles sample-rate validation, length alignment, and timestamp checks.
+    """
+    def __init__(self, 
+                 weights: Optional[list[float]] = None, 
+                 align_mode: str = 'truncate',
+                 tolerance_hz: float = 1e-3) -> None:
+        """
+        Args:
+            weights: Optional list of scalar multipliers for each input buffer.
+            align_mode: 'truncate' (use min length) or 'pad' (use max length with zero-padding).
+            tolerance_hz: Max allowable sample rate mismatch in Hz.
+        """
+        if align_mode not in ('truncate', 'pad'):
+            raise ValueError(f"Invalid align_mode: '{align_mode}'. Choose 'truncate' or 'pad'.")
+            
+        super().__init__(
+            weights=weights,
+            align_mode=align_mode,
+            tolerance_hz=tolerance_hz
+        )
+        self.reset()
+
+    def reset(self) -> None:
+        pass # Stateless block
+
+    def process(self, buffers: list[SignalBuffer]) -> SignalBuffer:
+        """
+        Main entry point for adding a list of SignalBuffers.
+        
+        Args:
+            buffers: List of 2 or more SignalBuffer objects to sum together.
+            
+        Returns:
+            SignalBuffer containing the element-wise sum.
+        """
+        if not buffers:
+            raise ValueError("SignalBufferAdderBlock requires at least one SignalBuffer.")
+        if len(buffers) == 1:
+            return buffers[0]
+
+        # 1. Validate Sample Rates
+        fs0 = buffers[0].sample_rate
+        tol = self._params['tolerance_hz']
+        for idx, buf in enumerate(buffers[1:], start=1):
+            if abs(buf.sample_rate - fs0) > tol:
+                raise ValueError(
+                    f"Sample rate mismatch: Buffer 0 has fs={fs0} Hz, "
+                    f"but Buffer {idx} has fs={buf.sample_rate} Hz."
+                )
+
+        # 2. Extract Weights
+        weights = self._params['weights']
+        if weights is not None:
+            if len(weights) != len(buffers):
+                raise ValueError(
+                    f"Number of weights ({len(weights)}) does not match "
+                    f"number of input buffers ({len(buffers)})."
+                )
+        else:
+            weights = [1.0] * len(buffers)
+
+        # 3. Determine Output Length
+        lengths = [buf.active_length for buf in buffers]
+        align_mode = self._params['align_mode']
+        
+        if align_mode == 'truncate':
+            out_len = min(lengths)
+        else:  # 'pad'
+            out_len = max(lengths)
+
+        # 4. Perform Summation
+        # Check if any buffer contains complex data
+        is_complex = any(np.iscomplexobj(buf.data) for buf in buffers)
+        dtype = np.complex128 if is_complex else np.float64
+        
+        summed_data = np.zeros(out_len, dtype=dtype)
+
+        for buf, w in zip(buffers, weights):
+            data = buf.data
+            curr_len = len(data)
+            
+            if align_mode == 'truncate':
+                summed_data += w * data[:out_len]
+            else:  # 'pad'
+                if curr_len < out_len:
+                    padded = np.pad(data, (0, out_len - curr_len), mode='constant')
+                    summed_data += w * padded
+                else:
+                    summed_data += w * data[:out_len]
+
+        # Return a new buffer preserving the reference metadata from the first buffer
+        return SignalBuffer(
+            data=summed_data,
+            sample_rate=fs0,
+            timestamp=buffers[0].timestamp
         )

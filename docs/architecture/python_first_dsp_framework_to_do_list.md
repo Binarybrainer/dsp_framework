@@ -40,13 +40,13 @@ This roadmap adopts a **Python-First / Rapid Prototyping** strategy. The goal is
   - [x] Implement Phase Frequency Detector (PFD).
   - [x] Implement Digital Loop Filter (PI controller).
   - [x] Implement VCO/NCO (Numerically Controlled Oscillator).
-- [ ] **Clock and Data Recovery (CDR)**
-  - [ ] Implement Alexander (Bang-Bang) Phase Detector.
-  - [ ] Implement Phase Interpolator (PI) logic.
-  - [ ] Create Eye Diagram visualization utility for CDR analysis.
-- [ ] **MIMO Processing**
-  - [ ] Implement basic $H$ Matrix channel modeling (e.g., $2 \times 2$ or $4 \times 4$).
-  - [ ] Implement Zero-Forcing (ZF) and MMSE linear equalizers.
+- [x] **Clock and Data Recovery (CDR)**
+  - [x] Implement Alexander (Bang-Bang) Phase Detector.
+  - [x] Implement Phase Interpolator (PI) logic.
+  - [x] Create Eye Diagram visualization utility for CDR analysis.
+- [x] **MIMO Processing**
+  - [x] Implement basic $H$ Matrix channel modeling (e.g., $2 \times 2$ or $4 \times 4$).
+  - [x] Implement Zero-Forcing (ZF) and MMSE linear equalizers.
 
 ## Phase 4: Profiling & Backend Migration
 *Focus: Identifying performance bottlenecks and seamlessly swapping them out with C++ extensions.*

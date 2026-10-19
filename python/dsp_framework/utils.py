@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import welch
 from dsp_framework.core import SignalBuffer
+from scipy.signal import windows
 
 class MatplotlibDSPPlotter:
     """
@@ -68,6 +69,71 @@ class MatplotlibDSPPlotter:
 
         fig.tight_layout()
         return fig
+    @staticmethod
+    def plot_fft(buffer: SignalBuffer, nperseg: int = 1024, title: str = "Fast Fourier Transform", figsize: tuple = (10,4), window_type = "hann", normalization = "amplitude") -> plt.Figure:
+
+        """
+        window_type : rectangular, hann, hamming, blackman, flattop
+        normalization: amplitude, ortho
+        
+        """
+        def _get_window(length: int) -> np.ndarray:
+            w_type = window_type
+            if w_type == 'rectangular' or w_type == 'none':
+                return np.ones(length, dtype=np.float64)
+            elif w_type == 'hann':
+                return windows.hann(length, sym=False)
+            elif w_type == 'hamming':
+                return windows.hamming(length, sym=False)
+            elif w_type == 'blackman':
+                return windows.blackman(length, sym=False)
+            elif w_type == 'flattop':
+                return windows.flattop(length, sym=False)
+            else:
+                raise ValueError(f"Unsupported window type: {w_type}")
+
+        data = buffer.data
+        N = len(data)
+        n_fft = nperseg 
+        
+        # 1. Apply Window Function
+        w = _get_window(N)
+        windowed_data = data * w
+        
+        # 2. Perform Forward FFT
+        norm_mode = normalization
+        if norm_mode == 'amplitude':
+            # Coherent amplitude scaling
+            scale = 1.0 / np.sum(w)
+            fft_data = np.fft.fft(windowed_data, n=n_fft) * scale
+        elif norm_mode == 'ortho':
+            fft_data = np.fft.fft(windowed_data, n=n_fft, norm='ortho')
+        else:
+            fft_data = np.fft.fft(windowed_data, n=n_fft)
+
+        
+        # Frequency step
+        df = buffer.sample_rate / n_fft
+        # Frequency
+        frequencies = np.arange(0,buffer.sample_rate, df)
+
+        # Shift zero frequency to center
+        fft_data = np.fft.fftshift(fft_data)
+
+        # Convert to dB scale (with epsilon guard against log(0))
+        fft_data_db = 10 * np.log10(fft_data + 1e-12)
+
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.plot(frequencies, fft_data_db, color='#2ca02c', linewidth=1.5)
+
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.set_xlabel("Frequency (Hz)", fontsize=10)
+        ax.set_ylabel("Amplitude (dB/Hz)", fontsize=10)
+        ax.grid(True, linestyle=':', alpha=0.6)
+
+        fig.tight_layout()
+        return fig
+
 
     @staticmethod
     def plot_constellation(buffer: SignalBuffer, max_points: int = 10000, title: str = "Constellation Diagram", figsize: tuple = (6, 6)) -> plt.Figure:
@@ -87,7 +153,7 @@ class MatplotlibDSPPlotter:
 
         fig, ax = plt.subplots(figsize=figsize)
         
-        ax.scatter(data.real, data.imag, color='#d62728', alpha=0.3, s=12, edgecolors='none')
+        ax.scatter(data.real, data.imag, color="#d62727", alpha=0.3, s=12, edgecolors='none')
 
         ax.set_title(title, fontsize=12, fontweight='bold')
         ax.set_xlabel("In-Phase (I)", fontsize=10)

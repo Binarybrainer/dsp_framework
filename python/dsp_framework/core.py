@@ -200,7 +200,10 @@ class SignalSource(DSPBlock):
         Must be implemented by child classes.
         """
         pass
+    def process(self):
+        print('No thing process, This is source from Signal Source')
 
+    
 from scipy.signal import max_len_seq
 
 class PRBSGenerator(SignalSource):
@@ -958,3 +961,102 @@ class MIMOLinearEqualizer(DSPBlock):
         X_hat = Y @ self.W.T
         
         return input_buf.clone_metadata(X_hat)
+
+import numpy as np
+from typing import Any, Optional
+from scipy.signal import windows
+from dsp_framework.core.dsp_block_api import DSPBlock
+from dsp_framework.core.signal_buffer_spec import SignalBuffer
+
+class FFTBlock(DSPBlock):
+    """
+    Computes forward FFT on streaming SignalBuffers with optional windowing,
+    padding, and power/amplitude scaling options.
+    """
+    def __init__(self, 
+                 n_fft: Optional[int] = None, 
+                 window_type: str = 'rectangular',
+                 normalization: str = 'standard') -> None:
+        """
+        Args:
+            n_fft: FFT length. If None, uses chunk length.
+            window_type: 'rectangular', 'hann', 'hamming', 'blackman', 'flattop'.
+            normalization: 'standard' (no scale), 'ortho' (1/sqrt(N)), or 'amplitude' (1/N).
+        """
+        super().__init__(n_fft=n_fft, window_type=window_type.lower(), normalization=normalization)
+        self.reset()
+
+    def reset(self) -> None:
+        pass  # Stateless for independent FFT frames
+
+    def _get_window(self, length: int) -> np.ndarray:
+        w_type = self._params['window_type']
+        if w_type == 'rectangular' or w_type == 'none':
+            return np.ones(length, dtype=np.float64)
+        elif w_type == 'hann':
+            return windows.hann(length, sym=False)
+        elif w_type == 'hamming':
+            return windows.hamming(length, sym=False)
+        elif w_type == 'blackman':
+            return windows.blackman(length, sym=False)
+        elif w_type == 'flattop':
+            return windows.flattop(length, sym=False)
+        else:
+            raise ValueError(f"Unsupported window type: {w_type}")
+
+    def process(self, input_buf: SignalBuffer, **kwargs: Any) -> SignalBuffer:
+        data = input_buf.data
+        N = len(data)
+        n_fft = self._params['n_fft'] if self._params['n_fft'] is not None else N
+        
+        # 1. Apply Window Function
+        w = self._get_window(N)
+        windowed_data = data * w
+        
+        # 2. Perform Forward FFT
+        norm_mode = self._params['normalization']
+        if norm_mode == 'amplitude':
+            # Coherent amplitude scaling
+            scale = 1.0 / np.sum(w)
+            fft_data = np.fft.fft(windowed_data, n=n_fft) * scale
+        elif norm_mode == 'ortho':
+            fft_data = np.fft.fft(windowed_data, n=n_fft, norm='ortho')
+        else:
+            fft_data = np.fft.fft(windowed_data, n=n_fft)
+            
+        # Frequency step
+        df = input_buf.sample_rate / n_fft
+        
+        return SignalBuffer(
+            data=fft_data,
+            sample_rate=input_buf.sample_rate,
+            timestamp=input_buf.timestamp
+        )
+
+
+class IFFTBlock(DSPBlock):
+    """
+    Computes Inverse FFT to convert frequency-domain buffers back to time domain.
+    """
+    def __init__(self, n_fft: Optional[int] = None, normalization: str = 'standard') -> None:
+        super().__init__(n_fft=n_fft, normalization=normalization)
+        self.reset()
+
+    def reset(self) -> None:
+        pass
+
+    def process(self, input_buf: SignalBuffer, **kwargs: Any) -> SignalBuffer:
+        data = input_buf.data
+        n_fft = self._params['n_fft'] if self._params['n_fft'] is not None else len(data)
+        norm_mode = self._params['normalization']
+        
+        if norm_mode == 'ortho':
+            time_data = np.fft.ifft(data, n=n_fft, norm='ortho')
+        else:
+            time_data = np.fft.ifft(data, n=n_fft)
+            
+        return SignalBuffer(
+            data=time_data,
+            sample_rate=input_buf.sample_rate,
+            timestamp=input_buf.timestamp
+        )

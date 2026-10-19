@@ -866,3 +866,95 @@ class EyeDiagramPlotter:
         )
         
         return fig
+
+
+class MIMOFlatFadingChannel(DSPBlock):
+    """
+    Simulates a static, frequency-flat Rayleigh fading MIMO channel.
+    """
+    def __init__(self, num_tx: int = 2, num_rx: int = 2) -> None:
+        super().__init__(num_tx=num_tx, num_rx=num_rx)
+        self._generate_h_matrix()
+        self.reset()
+        
+    def reset(self) -> None:
+        pass
+
+    def _generate_h_matrix(self) -> None:
+        """Generates a random complex Rayleigh fading matrix."""
+        num_tx = self._params['num_tx']
+        num_rx = self._params['num_rx']
+        
+        # H is sized (N_rx, N_tx). Elements are complex Gaussian with unit variance.
+        self.H = (np.random.randn(num_rx, num_tx) + 1j * np.random.randn(num_rx, num_tx)) / np.sqrt(2)
+
+    def process(self, input_buf: SignalBuffer, **kwargs: Any) -> SignalBuffer:
+        """
+        Applies the H matrix to the transmitted data.
+        input_buf.data shape: (N_samples, N_tx)
+        """
+        X = input_buf.data
+        
+        # Apply channel: Y = X @ H^T
+        # Shape output: (N_samples, N_rx)
+        Y = X @ self.H.T
+        
+        return input_buf.clone_metadata(Y)
+
+class MIMOLinearEqualizer(DSPBlock):
+    """
+    Applies ZF or MMSE linear equalization to a received MIMO signal.
+    Assumes perfect Channel State Information (CSI) is passed to the block.
+    """
+    def __init__(self, H_est: np.ndarray, snr_linear: float = 100.0, method: str = 'mmse') -> None:
+        """
+        H_est: The estimated channel matrix (N_rx, N_tx).
+        snr_linear: Signal to Noise Ratio in linear scale (required for MMSE).
+        method: 'zf' or 'mmse'.
+        """
+        super().__init__(H_est=H_est, snr_linear=snr_linear, method=method.lower())
+        self._calculate_weights()
+        self.reset()
+        
+    def reset(self) -> None:
+        pass
+
+    def _calculate_weights(self) -> None:
+        H = self._params['H_est']
+        snr = self._params['snr_linear']
+        method = self._params['method']
+        
+        num_rx, num_tx = H.shape
+        H_hermitian = H.conj().T
+        
+        if method == 'zf':
+            # Pseudo-inverse of H
+            self.W = np.linalg.pinv(H)
+            
+        elif method == 'mmse':
+            # MMSE formula: (H^H * H + (1/SNR) * I)^-1 * H^H
+            identity = np.eye(num_tx)
+            inverse_term = np.linalg.inv((H_hermitian @ H) + (1.0 / snr) * identity)
+            self.W = inverse_term @ H_hermitian
+            
+        else:
+            raise ValueError(f"Unknown equalization method: {method}")
+
+    def update_params(self, **kwargs: Any) -> None:
+        super().update_params(**kwargs)
+        # Recalculate weight matrix if H_est or SNR changes
+        if 'H_est' in kwargs or 'snr_linear' in kwargs or 'method' in kwargs:
+            self._calculate_weights()
+
+    def process(self, input_buf: SignalBuffer, **kwargs: Any) -> SignalBuffer:
+        """
+        Applies the equalization matrix W to the received data.
+        input_buf.data shape: (N_samples, N_rx)
+        """
+        Y = input_buf.data
+        
+        # Apply equalization: X_hat = Y @ W^T
+        # Shape output: (N_samples, N_tx)
+        X_hat = Y @ self.W.T
+        
+        return input_buf.clone_metadata(X_hat)
